@@ -1,0 +1,496 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>PMO One Stone — Risk & Identity Q1.2026</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+<script src="https://unpkg.com/recharts@2.12.7/umd/Recharts.js"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: Inter, system-ui, sans-serif; background: #f1f5f9; }
+  select, input, textarea, button { font-family: inherit; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+
+// ══════════════════════════════════════════════════
+// ⚙️  CONFIGURAÇÃO — substitua pela URL do seu Apps Script
+// ══════════════════════════════════════════════════
+const APPS_SCRIPT_URL = "https://script.google.com/a/macros/stone.com.br/s/AKfycbxtXcWKgQh0TA9uxXvDxrv8Xy2a_ooXeWLW5KvEANOOz1yQ9yO7ypSGKYLOOw6Na7OqFg/exec";
+// ══════════════════════════════════════════════════
+
+const { useState, useMemo, useEffect, useCallback } = React;
+const { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Cell, ResponsiveContainer, PieChart, Pie, Legend } = Recharts;
+
+const STATUS_COLORS = {
+  "Concluído — Em Produção":           { bg:"#15803d", text:"#fff" },
+  "Concluído — Em Rollout":            { bg:"#16a34a", text:"#fff" },
+  "Concluído":                         { bg:"#22c55e", text:"#fff" },
+  "Em andamento — Em Desenvolvimento": { bg:"#1d4ed8", text:"#fff" },
+  "Em andamento — Em Testes":          { bg:"#2563eb", text:"#fff" },
+  "Em andamento — Em Homologação":     { bg:"#3b82f6", text:"#fff" },
+  "Em andamento — Pronto para Deploy": { bg:"#06b6d4", text:"#fff" },
+  "Em andamento":                      { bg:"#60a5fa", text:"#1e293b" },
+  "Bloqueado — Aguardando Decisão":    { bg:"#b91c1c", text:"#fff" },
+  "Bloqueado — Aguardando Terceiros":  { bg:"#dc2626", text:"#fff" },
+  "Bloqueado":                         { bg:"#ef4444", text:"#fff" },
+  "Refinamento":                       { bg:"#d97706", text:"#fff" },
+  "Discovery":                         { bg:"#7c3aed", text:"#fff" },
+  "A iniciar":                         { bg:"#9ca3af", text:"#fff" },
+  "Não iniciado":                      { bg:"#94a3b8", text:"#fff" },
+  "Não priorizado":                    { bg:"#cbd5e1", text:"#334155" },
+  "Cancelado":                         { bg:"#6b7280", text:"#fff" },
+};
+const FAROL_ICON = { "No prazo":"🟢", "Alerta":"🟡", "Atrasado":"🔴", "":"⚪" };
+const TRIBOS = ["Cadastro","IAM","Riscos de Fraudes","Riscos Financeiros"];
+const OBJETIVOS = ["Descontinuar o Pagar.Me","Disponibilizar Todas as Ofertas em Todos os Canais","Unificar Nossa Base de Cadastro","Unificar o Login dos Apps e Dashs","Rebranding"];
+const ETAPAS = ["1º Piloto interno cross","2º Piloto interno cross","Venda Nova","Migração Pagar.me","Migração Ton"];
+const TRIBO_COLORS = { "Cadastro":"#2563eb","IAM":"#7c3aed","Riscos de Fraudes":"#dc2626","Riscos Financeiros":"#d97706" };
+const RESP_ALIANCA = { "Cadastro":"@Gabibot","IAM":"@Kellyene Coelho","Riscos de Fraudes":"@Amanda Ribeiro","Riscos Financeiros":"@Gustavo de Paula" };
+
+const isBlockedOrAlert = i => i.status.startsWith("Bloqueado")||i.farol==="Alerta"||i.farol==="Atrasado";
+const needsUpdates = i => ["Em andamento","Bloqueado","A iniciar","Refinamento","Discovery"].some(s=>i.status.startsWith(s));
+
+function missingFields(item) {
+  return [
+    {key:"status",label:"Status"},
+    {key:"farol",label:"Farol"},
+    {key:"responsavel",label:"Responsável"},
+    {key:"objetivo",label:"Objetivo"},
+    {key:"etapa",label:"Etapa"},
+    {key:"bloqueio",label:"Bloqueio",onlyFor:i=>isBlockedOrAlert(i)},
+    {key:"updates",label:"Updates",onlyFor:i=>needsUpdates(i)},
+  ].filter(f=>{
+    if(f.onlyFor&&!f.onlyFor(item)) return false;
+    const v=item[f.key]; return !v||v.toString().trim()==="";
+  });
+}
+
+const Badge = ({status}) => {
+  const c = STATUS_COLORS[status]||{bg:"#9ca3af",text:"#fff"};
+  return <span style={{background:c.bg,color:c.text,borderRadius:4,padding:"2px 7px",fontSize:11,fontWeight:700,whiteSpace:"nowrap"}}>{status||"—"}</span>;
+};
+
+const Modal = ({item,onClose,onSave,onDelete}) => {
+  const [form,setForm] = useState({...item});
+  const set = (k,v) => setForm(f=>({...f,[k]:v}));
+  const miss = missingFields(form);
+  return (
+    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.55)",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
+      <div style={{background:"#fff",borderRadius:10,padding:24,width:"100%",maxWidth:540,maxHeight:"92vh",overflowY:"auto",boxShadow:"0 8px 40px rgba(0,0,0,0.25)"}}>
+        {miss.length>0&&<div style={{background:"#fef2f2",border:"1px solid #fca5a5",borderRadius:6,padding:"7px 12px",marginBottom:12,fontSize:12,color:"#dc2626"}}>⚠️ Faltando: <strong>{miss.map(f=>f.label).join(", ")}</strong></div>}
+        <div style={{fontWeight:700,fontSize:14,marginBottom:14}}>{form.hierarquia} — {form.titulo}</div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:9}}>
+          {[["Status","status",Object.keys(STATUS_COLORS)],["Farol","farol",["","No prazo","Alerta","Atrasado"]]].map(([lbl,key,opts])=>(
+            <label key={key} style={{fontSize:12,color:"#64748b",display:"flex",flexDirection:"column",gap:3}}>
+              {lbl}<select value={form[key]||""} onChange={e=>set(key,e.target.value)} style={{padding:"5px 8px",borderRadius:5,border:"1px solid #cbd5e1",fontSize:12}}>
+                <option value="">--</option>{opts.map(o=><option key={o}>{o}</option>)}
+              </select>
+            </label>
+          ))}
+          {[["Tribo","tribo",TRIBOS],["Objetivo","objetivo",OBJETIVOS],["Etapa","etapa",ETAPAS]].map(([lbl,key,opts])=>(
+            <label key={key} style={{fontSize:12,color:"#64748b",display:"flex",flexDirection:"column",gap:3,gridColumn:key==="tribo"?"auto":"1/-1"}}>
+              {lbl}<select value={form[key]||""} onChange={e=>set(key,e.target.value)} style={{padding:"5px 8px",borderRadius:5,border:"1px solid #cbd5e1",fontSize:12}}>
+                <option value="">--</option>{opts.map(o=><option key={o}>{o}</option>)}
+              </select>
+            </label>
+          ))}
+          {[["Título","titulo"],["Hierarquia","hierarquia"],["Responsável","responsavel"]].map(([lbl,key])=>(
+            <label key={key} style={{fontSize:12,color:"#64748b",display:"flex",flexDirection:"column",gap:3,gridColumn:key==="hierarquia"?"auto":"1/-1"}}>
+              {lbl}<input value={form[key]||""} onChange={e=>set(key,e.target.value)} style={{padding:"5px 8px",borderRadius:5,border:"1px solid #cbd5e1",fontSize:12}}/>
+            </label>
+          ))}
+          {[["Início","inicio"],["Prazo","prazo"],["Novo Prazo","novoPrazo"],["Data Acordada","dataAcordada"]].map(([lbl,key])=>(
+            <label key={key} style={{fontSize:12,color:"#64748b",display:"flex",flexDirection:"column",gap:3}}>
+              {lbl}<input type="date" value={form[key]||""} onChange={e=>set(key,e.target.value)} style={{padding:"5px 8px",borderRadius:5,border:"1px solid #cbd5e1",fontSize:12}}/>
+            </label>
+          ))}
+          {isBlockedOrAlert(form)&&<label style={{fontSize:12,color:"#64748b",display:"flex",flexDirection:"column",gap:3,gridColumn:"1/-1"}}>
+            Bloqueio<input value={form.bloqueio||""} onChange={e=>set("bloqueio",e.target.value)} style={{padding:"5px 8px",borderRadius:5,border:"1px solid #cbd5e1",fontSize:12}} placeholder="Descreva o bloqueio..."/>
+          </label>}
+          {needsUpdates(form)&&<label style={{fontSize:12,color:"#64748b",display:"flex",flexDirection:"column",gap:3,gridColumn:"1/-1"}}>
+            Updates & Próximos Passos<textarea value={form.updates||""} onChange={e=>set("updates",e.target.value)} rows={3} style={{padding:"5px 8px",borderRadius:5,border:"1px solid #cbd5e1",fontSize:12,resize:"vertical"}}/>
+          </label>}
+        </div>
+        <div style={{display:"flex",gap:8,marginTop:16,justifyContent:"space-between"}}>
+          <button onClick={()=>{if(window.confirm("Remover este item?")){onDelete(item.id);onClose();}}} style={{padding:"6px 12px",borderRadius:5,border:"1px solid #fca5a5",background:"#fef2f2",color:"#dc2626",cursor:"pointer",fontSize:12}}>Excluir</button>
+          <div style={{display:"flex",gap:8}}>
+            <button onClick={onClose} style={{padding:"6px 14px",borderRadius:5,border:"1px solid #cbd5e1",background:"#f8fafc",cursor:"pointer",fontSize:12}}>Cancelar</button>
+            <button onClick={()=>{onSave(form);onClose();}} style={{padding:"6px 14px",borderRadius:5,border:"none",background:"#2563eb",color:"#fff",cursor:"pointer",fontSize:12,fontWeight:700}}>Salvar</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default function App() {
+  const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [lastSync, setLastSync] = useState("");
+  const [editing, setEditing] = useState(null);
+  const [view, setView] = useState("macro");
+  const [filterTribo, setFilterTribo] = useState([]);
+  const [filterStatus, setFilterStatus] = useState([]);
+  const [search, setSearch] = useState("");
+  const [showAdd, setShowAdd] = useState(false);
+  const [newTitle, setNewTitle] = useState("");
+  const [newTribo, setNewTribo] = useState(TRIBOS[0]);
+  const [fixTribo, setFixTribo] = useState("Todas");
+
+  // ── CARREGAR DADOS DO SHEETS ─────────────────────────────────────────
+  useEffect(() => {
+    async function load() {
+      try {
+        const res = await fetch(APPS_SCRIPT_URL);
+        const json = await res.json();
+        if (json.ok) {
+          const parsed = json.data.map(r => ({
+            ...r,
+            id: Number(r.id) || r.id,
+          }));
+          setItems(parsed);
+          setLastSync("Carregado: " + new Date().toLocaleString("pt-BR"));
+        } else {
+          setError("Erro ao carregar: " + json.error);
+        }
+      } catch (e) {
+        setError("Falha de conexão. Verifique a URL do Apps Script.");
+      }
+      setLoading(false);
+    }
+    load();
+  }, []);
+
+  // ── SALVAR ITEM ───────────────────────────────────────────────────────
+  const saveItem = async (updated) => {
+    setItems(p => p.map(i => i.id === updated.id ? updated : i));
+    setSaving(true);
+    try {
+      await fetch(APPS_SCRIPT_URL, {
+        method: "POST",
+        body: JSON.stringify({ action: "update", item: updated }),
+      });
+      setLastSync("Salvo: " + new Date().toLocaleString("pt-BR"));
+    } catch { alert("Erro ao salvar no Sheets."); }
+    setSaving(false);
+  };
+
+  // ── EXCLUIR ITEM ──────────────────────────────────────────────────────
+  const deleteItem = async (id) => {
+    setItems(p => p.filter(i => i.id !== id));
+    try {
+      await fetch(APPS_SCRIPT_URL, {
+        method: "POST",
+        body: JSON.stringify({ action: "delete", id }),
+      });
+    } catch { alert("Erro ao excluir."); }
+  };
+
+  // ── ADICIONAR ITEM ────────────────────────────────────────────────────
+  const addItem = async () => {
+    if (!newTitle.trim()) return;
+    const newId = Date.now();
+    const item = { id: newId, tribo: newTribo, hierarquia: "", titulo: newTitle,
+      objetivo: "", etapa: "", status: "", farol: "", bloqueio: "",
+      responsavel: "", inicio: "", prazo: "", novoPrazo: "", dataAcordada: "", updates: "" };
+    setItems(p => [...p, item]);
+    setNewTitle(""); setShowAdd(false);
+    try {
+      await fetch(APPS_SCRIPT_URL, {
+        method: "POST",
+        body: JSON.stringify({ action: "add", item }),
+      });
+    } catch { alert("Erro ao adicionar no Sheets."); }
+  };
+
+  const incomplete = useMemo(() => items.filter(i => missingFields(i).length > 0), [items]);
+  const filteredIncomplete = useMemo(() => incomplete.filter(i => fixTribo === "Todas" || i.tribo === fixTribo), [incomplete, fixTribo]);
+  const visible = useMemo(() => items.filter(i =>
+    (filterTribo.length === 0 || filterTribo.includes(i.tribo)) &&
+    (filterStatus.length === 0 || filterStatus.includes(i.status)) &&
+    (search === "" || [i.titulo, i.responsavel, i.hierarquia, i.tribo].join(" ").toLowerCase().includes(search.toLowerCase()))
+  ), [items, filterTribo, filterStatus, search]);
+
+  const blocked = items.filter(i => i.status.startsWith("Bloqueado"));
+  const alertItems = items.filter(i => (i.farol === "Alerta" || i.farol === "Atrasado") && !i.status.startsWith("Bloqueado") && !i.status.startsWith("Concluído") && !i.status.startsWith("Cancelado"));
+  const done = items.filter(i => i.status.startsWith("Concluído")).length;
+  const pct = items.length ? Math.round((done / items.length) * 100) : 0;
+  const summaryByTribo = useMemo(() => TRIBOS.map(tribo => {
+    const sub = items.filter(i => i.tribo === tribo);
+    return { tribo, total: sub.length, done: sub.filter(i => i.status.startsWith("Concluído")).length, ongoing: sub.filter(i => i.status.startsWith("Em andamento")).length, blocked: sub.filter(i => i.status.startsWith("Bloqueado")).length, alert: sub.filter(i => i.farol === "Alerta" || i.farol === "Atrasado").length };
+  }), [items]);
+
+  const VIEWS = [["macro","Macro"],["tribo","Por Tribo"],["list","Lista"],["bloqueios","🔴 Bloqueios"],["fix","⚠️ Correções"]];
+
+  if (loading) return (
+    <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100vh",flexDirection:"column",gap:12}}>
+      <div style={{fontSize:24}}>⏳</div>
+      <div style={{fontSize:14,color:"#64748b"}}>Carregando dados do Sheets...</div>
+    </div>
+  );
+
+  if (error) return (
+    <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100vh",flexDirection:"column",gap:16,padding:32}}>
+      <div style={{fontSize:24}}>⚠️</div>
+      <div style={{fontSize:14,color:"#dc2626",fontWeight:700}}>Erro de conexão</div>
+      <div style={{fontSize:12,color:"#64748b",textAlign:"center",maxWidth:480}}>{error}</div>
+      <div style={{fontSize:11,color:"#94a3b8",textAlign:"center"}}>Verifique se a URL do Apps Script está correta no arquivo index.html</div>
+    </div>
+  );
+
+  return (
+    <div style={{fontFamily:"Inter,system-ui,sans-serif",background:"#f1f5f9",minHeight:"100vh",padding:14,fontSize:14}}>
+      {editing && <Modal item={editing} onClose={() => setEditing(null)} onSave={saveItem} onDelete={deleteItem}/>}
+
+      {/* HEADER */}
+      <div style={{background:"#0f172a",borderRadius:10,padding:"12px 18px",marginBottom:12,display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:8}}>
+        <div>
+          <div style={{color:"#f1f5f9",fontSize:16,fontWeight:800}}>PMO One Stone — Risk & Identity</div>
+          <div style={{color:"#64748b",fontSize:11,marginTop:3}}>Cadastro · IAM · Riscos de Fraudes · Riscos Financeiros</div>
+        </div>
+        <div style={{display:"flex",gap:5,flexWrap:"wrap",alignItems:"center"}}>
+          {VIEWS.map(([v,lbl]) => (
+            <button key={v} onClick={() => setView(v)} style={{padding:"5px 11px",borderRadius:6,border:v==="fix"&&incomplete.length>0?"1px solid #f97316":"none",cursor:"pointer",fontSize:11,fontWeight:700,background:view===v?"#3b82f6":v==="fix"&&incomplete.length>0?"#431407":"#1e293b",color:v==="fix"&&incomplete.length>0?"#fb923c":"#fff"}}>
+              {lbl}{v==="fix"&&incomplete.length>0?` (${incomplete.length})`:""}
+            </button>
+          ))}
+        </div>
+        <div style={{display:"flex",gap:8,alignItems:"center"}}>
+          {saving && <span style={{color:"#60a5fa",fontSize:11}}>💾 Salvando...</span>}
+          {!saving && lastSync && <span style={{color:"#475569",fontSize:10}}>{lastSync}</span>}
+        </div>
+      </div>
+
+      {/* KPIs */}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8,marginBottom:12}}>
+        {[
+          {label:"Total",val:items.length,color:"#1e293b"},
+          {label:`Concluídos (${pct}%)`,val:done,color:"#15803d"},
+          {label:"Bloqueados",val:blocked.length,color:"#dc2626"},
+          {label:"Em Alerta",val:alertItems.length,color:"#d97706"},
+        ].map(({label,val,color}) => (
+          <div key={label} style={{background:"#fff",borderRadius:8,padding:"10px 14px",boxShadow:"0 1px 4px rgba(0,0,0,0.07)"}}>
+            <div style={{fontSize:11,color:"#64748b"}}>{label}</div>
+            <div style={{fontSize:22,fontWeight:800,color}}>{val}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* ADICIONAR */}
+      {showAdd && (
+        <div style={{background:"#fff",borderRadius:8,padding:14,marginBottom:12,boxShadow:"0 1px 4px rgba(0,0,0,0.07)",display:"flex",gap:8,flexWrap:"wrap",alignItems:"flex-end"}}>
+          <div style={{display:"flex",flexDirection:"column",gap:3,flex:1,minWidth:200}}>
+            <label style={{fontSize:12,color:"#64748b"}}>Título</label>
+            <input value={newTitle} onChange={e=>setNewTitle(e.target.value)} placeholder="Nome do item..." style={{padding:"5px 8px",borderRadius:5,border:"1px solid #cbd5e1",fontSize:12}}/>
+          </div>
+          <div style={{display:"flex",flexDirection:"column",gap:3}}>
+            <label style={{fontSize:12,color:"#64748b"}}>Tribo</label>
+            <select value={newTribo} onChange={e=>setNewTribo(e.target.value)} style={{padding:"5px 8px",borderRadius:5,border:"1px solid #cbd5e1",fontSize:12}}>
+              {TRIBOS.map(t=><option key={t}>{t}</option>)}
+            </select>
+          </div>
+          <button onClick={addItem} style={{padding:"6px 16px",borderRadius:5,border:"none",background:"#2563eb",color:"#fff",fontWeight:700,fontSize:12,cursor:"pointer"}}>+ Adicionar</button>
+          <button onClick={()=>setShowAdd(false)} style={{padding:"6px 12px",borderRadius:5,border:"1px solid #cbd5e1",background:"#f8fafc",fontSize:12,cursor:"pointer"}}>Cancelar</button>
+        </div>
+      )}
+
+      {/* VIEWS */}
+      {view === "macro" && (
+        <div style={{display:"flex",flexDirection:"column",gap:10}}>
+          <div style={{background:"#fff",borderRadius:10,padding:16,boxShadow:"0 1px 4px rgba(0,0,0,0.07)"}}>
+            <div style={{fontWeight:700,fontSize:13,marginBottom:12}}>📊 Progresso por Tribo</div>
+            <ResponsiveContainer width="100%" height={160}>
+              <BarChart data={summaryByTribo} margin={{top:4,right:8,left:-20,bottom:0}}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9"/>
+                <XAxis dataKey="tribo" tick={{fontSize:10}} tickFormatter={v=>v.split(" ")[0]}/>
+                <YAxis tick={{fontSize:10}}/>
+                <Tooltip contentStyle={{fontSize:11}}/>
+                <Bar dataKey="done" name="Concluídos" stackId="a" fill="#22c55e" radius={[0,0,0,0]}/>
+                <Bar dataKey="ongoing" name="Em andamento" stackId="a" fill="#3b82f6"/>
+                <Bar dataKey="blocked" name="Bloqueados" stackId="a" fill="#ef4444"/>
+                <Bar dataKey="alert" name="Alerta" stackId="a" fill="#f59e0b" radius={[4,4,0,0]}/>
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+            {summaryByTribo.map(({tribo,total,done,ongoing,blocked,alert}) => (
+              <div key={tribo} style={{background:"#fff",borderRadius:10,padding:14,boxShadow:"0 1px 4px rgba(0,0,0,0.07)"}}>
+                <div style={{display:"flex",justifyContent:"space-between",marginBottom:8}}>
+                  <div style={{fontWeight:700,fontSize:13,color:TRIBO_COLORS[tribo]||"#1e293b"}}>{tribo}</div>
+                  <div style={{fontSize:11,color:"#64748b"}}>{total} itens</div>
+                </div>
+                <div style={{fontSize:11,display:"flex",flexWrap:"wrap",gap:6}}>
+                  <span style={{background:"#f0fdf4",color:"#15803d",borderRadius:4,padding:"2px 7px"}}>✅ {done}</span>
+                  <span style={{background:"#eff6ff",color:"#1d4ed8",borderRadius:4,padding:"2px 7px"}}>🔵 {ongoing}</span>
+                  <span style={{background:"#fef2f2",color:"#dc2626",borderRadius:4,padding:"2px 7px"}}>🔴 {blocked}</span>
+                  {alert>0&&<span style={{background:"#fffbeb",color:"#d97706",borderRadius:4,padding:"2px 7px"}}>🟡 {alert}</span>}
+                </div>
+                <div style={{height:4,background:"#f1f5f9",borderRadius:4,marginTop:10}}>
+                  <div style={{height:4,background:TRIBO_COLORS[tribo]||"#3b82f6",borderRadius:4,width:`${total?Math.round(done/total*100):0}%`}}/>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {view === "list" && (
+        <div style={{display:"flex",flexDirection:"column",gap:10}}>
+          <div style={{background:"#fff",borderRadius:10,padding:12,boxShadow:"0 1px 4px rgba(0,0,0,0.07)",display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
+            <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Buscar por título, responsável, hierarquia..." style={{flex:1,minWidth:200,padding:"6px 10px",borderRadius:6,border:"1px solid #cbd5e1",fontSize:12}}/>
+            <select onChange={e=>{const v=e.target.value;setFilterTribo(v?[v]:[]);}} style={{padding:"6px 8px",borderRadius:6,border:"1px solid #cbd5e1",fontSize:12}}>
+              <option value="">Todas as tribos</option>{TRIBOS.map(t=><option key={t}>{t}</option>)}
+            </select>
+            <button onClick={()=>setShowAdd(true)} style={{padding:"6px 14px",borderRadius:6,border:"none",background:"#2563eb",color:"#fff",fontWeight:700,fontSize:12,cursor:"pointer"}}>+ Novo</button>
+          </div>
+          <div style={{display:"flex",flexDirection:"column",gap:5}}>
+            {visible.length === 0 && <div style={{background:"#fff",borderRadius:10,padding:32,textAlign:"center",color:"#94a3b8"}}>Nenhum item encontrado</div>}
+            {visible.map(item => (
+              <div key={item.id} onClick={()=>setEditing(item)} style={{background:"#fff",borderRadius:8,padding:"10px 14px",boxShadow:"0 1px 3px rgba(0,0,0,0.07)",cursor:"pointer",display:"flex",gap:10,alignItems:"flex-start",border:"1px solid #f1f5f9"}}>
+                <span style={{fontSize:11,background:TRIBO_COLORS[item.tribo]||"#64748b",color:"#fff",borderRadius:4,padding:"2px 6px",whiteSpace:"nowrap",flexShrink:0,marginTop:1}}>{item.tribo.split(" ")[0]}</span>
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{fontSize:11,color:"#7c3aed",fontFamily:"monospace",marginBottom:2}}>{item.hierarquia}</div>
+                  <div style={{fontSize:13,fontWeight:600,marginBottom:4,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{item.titulo}</div>
+                  <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
+                    <Badge status={item.status}/>
+                    {item.farol&&<span style={{fontSize:12}}>{FAROL_ICON[item.farol]||""}</span>}
+                    {item.responsavel&&<span style={{fontSize:11,color:"#64748b"}}>👤 {item.responsavel}</span>}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {view === "tribo" && (
+        <div style={{display:"flex",flexDirection:"column",gap:12}}>
+          {TRIBOS.map(tribo => {
+            const ti = items.filter(i => i.tribo === tribo);
+            if (!ti.length) return null;
+            const tdone = ti.filter(i=>i.status.startsWith("Concluído")).length;
+            const tblocked = ti.filter(i=>i.status.startsWith("Bloqueado"));
+            const talert = ti.filter(i=>(i.farol==="Alerta"||i.farol==="Atrasado")&&!i.status.startsWith("Bloqueado")&&!i.status.startsWith("Concluído")&&!i.status.startsWith("Cancelado"));
+            return (
+              <div key={tribo} style={{background:"#fff",borderRadius:10,padding:14,boxShadow:"0 1px 4px rgba(0,0,0,0.07)"}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+                  <div style={{fontWeight:700,fontSize:14,color:TRIBO_COLORS[tribo]||"#1e293b"}}>{tribo}</div>
+                  <div style={{fontSize:11,color:"#64748b"}}>{ti.length} itens · {Math.round(tdone/ti.length*100)}% concluído · Aliança: <strong>{RESP_ALIANCA[tribo]}</strong></div>
+                </div>
+                {tblocked.length > 0 && (
+                  <div style={{marginBottom:10}}>
+                    <div style={{fontSize:11,fontWeight:700,color:"#dc2626",marginBottom:5}}>🔴 Bloqueados ({tblocked.length})</div>
+                    {tblocked.map(item => (
+                      <div key={item.id} onClick={()=>setEditing(item)} style={{display:"flex",gap:8,padding:"6px 10px",background:"#fef2f2",borderRadius:6,marginBottom:3,cursor:"pointer",alignItems:"flex-start"}}>
+                        <span style={{fontSize:11,fontFamily:"monospace",color:"#7c3aed",flexShrink:0}}>{item.hierarquia}</span>
+                        <div style={{flex:1,fontSize:12}}>{item.titulo}</div>
+                        {item.bloqueio&&<span style={{fontSize:11,color:"#dc2626",flexShrink:0,maxWidth:200,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>⛔ {item.bloqueio}</span>}
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {talert.length > 0 && (
+                  <div>
+                    <div style={{fontSize:11,fontWeight:700,color:"#d97706",marginBottom:5}}>🟡 Em Alerta ({talert.length})</div>
+                    {talert.map(item => (
+                      <div key={item.id} onClick={()=>setEditing(item)} style={{display:"flex",gap:8,padding:"6px 10px",background:"#fffbeb",borderRadius:6,marginBottom:3,cursor:"pointer",alignItems:"flex-start"}}>
+                        <span style={{fontSize:11,fontFamily:"monospace",color:"#7c3aed",flexShrink:0}}>{item.hierarquia}</span>
+                        <div style={{flex:1,fontSize:12}}>{item.titulo}</div>
+                        <Badge status={item.status}/>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {view === "bloqueios" && (
+        <div style={{display:"flex",flexDirection:"column",gap:8}}>
+          <div style={{fontWeight:700,fontSize:13,color:"#dc2626",marginBottom:4}}>🔴 Todos os Bloqueios — {blocked.length} itens</div>
+          {TRIBOS.map(tribo => {
+            const tb = blocked.filter(i => i.tribo === tribo);
+            if (!tb.length) return null;
+            return (
+              <div key={tribo} style={{background:"#fff",borderRadius:10,padding:14,boxShadow:"0 1px 4px rgba(0,0,0,0.07)"}}>
+                <div style={{fontWeight:700,fontSize:13,color:TRIBO_COLORS[tribo],marginBottom:8}}>{tribo} ({tb.length})</div>
+                {tb.map(item => (
+                  <div key={item.id} onClick={()=>setEditing(item)} style={{display:"flex",gap:10,padding:"8px 10px",background:"#fef2f2",borderRadius:6,marginBottom:4,cursor:"pointer",alignItems:"flex-start",border:"1px solid #fecaca"}}>
+                    <div style={{flex:1}}>
+                      <div style={{fontSize:12,fontWeight:600,marginBottom:4}}><span style={{color:"#7c3aed",fontFamily:"monospace",marginRight:6}}>{item.hierarquia}</span>{item.titulo}</div>
+                      {item.bloqueio&&<div style={{fontSize:11,color:"#dc2626"}}>⛔ {item.bloqueio}</div>}
+                      {item.updates&&<div style={{fontSize:11,color:"#64748b",marginTop:2}}>💬 {item.updates}</div>}
+                    </div>
+                    <Badge status={item.status}/>
+                  </div>
+                ))}
+              </div>
+            );
+          })}
+          {blocked.length === 0 && <div style={{background:"#fff",borderRadius:10,padding:32,textAlign:"center",color:"#16a34a",fontSize:14}}>✅ Nenhum bloqueio!</div>}
+        </div>
+      )}
+
+      {view === "fix" && (
+        <div style={{display:"flex",flexDirection:"column",gap:10}}>
+          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:8}}>
+            <div style={{fontWeight:700,fontSize:13,color:"#ea580c"}}>⚠️ Itens incompletos — {filteredIncomplete.length}</div>
+            <select value={fixTribo} onChange={e=>setFixTribo(e.target.value)} style={{padding:"5px 8px",borderRadius:6,border:"1px solid #cbd5e1",fontSize:12}}>
+              <option value="Todas">Todas as tribos</option>{TRIBOS.map(t=><option key={t}>{t}</option>)}
+            </select>
+          </div>
+          {filteredIncomplete.length === 0
+            ? <div style={{background:"#fff",borderRadius:10,textAlign:"center",color:"#16a34a",padding:32,fontSize:14}}>✅ Nenhum item incompleto!</div>
+            : TRIBOS.map(tribo => {
+                const ti = filteredIncomplete.filter(i => i.tribo === tribo);
+                if (!ti.length) return null;
+                return (
+                  <div key={tribo} style={{background:"#fff",borderRadius:10,padding:14,boxShadow:"0 1px 4px rgba(0,0,0,0.07)"}}>
+                    <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
+                      <div style={{fontWeight:700,fontSize:13}}>{tribo}</div>
+                      <span style={{background:"#fff7ed",color:"#ea580c",borderRadius:10,padding:"1px 8px",fontSize:11,fontWeight:700}}>{ti.length} incompleto{ti.length>1?"s":""}</span>
+                    </div>
+                    {ti.map(item => {
+                      const miss = missingFields(item);
+                      return (
+                        <div key={item.id} style={{background:"#fffbeb",border:"1px solid #fed7aa",borderRadius:7,padding:"9px 12px",display:"flex",alignItems:"flex-start",gap:10,marginBottom:5}}>
+                          <span style={{fontSize:14}}>⚠️</span>
+                          <div style={{flex:1}}>
+                            <div style={{fontWeight:700,fontSize:12,marginBottom:5}}><span style={{color:"#7c3aed",fontFamily:"monospace"}}>{item.hierarquia}</span> — {item.titulo}</div>
+                            <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
+                              {miss.map(f=><span key={f.key} style={{background:"#fef3c7",color:"#92400e",borderRadius:10,padding:"1px 8px",fontSize:11,fontWeight:600,border:"1px solid #fcd34d"}}>{f.label}</span>)}
+                            </div>
+                          </div>
+                          <button onClick={()=>setEditing(item)} style={{padding:"3px 9px",borderRadius:5,border:"1px solid #cbd5e1",background:"#f8fafc",fontSize:11,cursor:"pointer",color:"#2563eb",fontWeight:600,flexShrink:0}}>✏️ Editar</button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })
+          }
+        </div>
+      )}
+
+      <div style={{textAlign:"center",color:"#94a3b8",fontSize:11,marginTop:12,paddingBottom:20}}>
+        PMO One Stone — Risk & Identity · {items.length} itens · Dados: Google Sheets
+      </div>
+    </div>
+  );
+}
+
+const root = ReactDOM.createRoot(document.getElementById("root"));
+root.render(<App />);
+</script>
+</body>
+</html>
